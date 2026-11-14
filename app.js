@@ -51,12 +51,12 @@ const DB = (() => {
 let EXAMS = [];
 const cur = {
   exam: null, session: null, problem: null,
-  answers: {}, limits: {}, marks: {},
+  answers: {}, limits: {}, marks: {}, scores: {},
   pages: [],            // {name, el, canvas, ctx, active}
   undo: [],
   tool: 'none', color: '#ffe74a',
   zoom: 1,
-  showAnswer: false, showReview: false,
+  showAnswer: false, showReview: false, showScore: false, showOriginal: false,
 };
 let fingerDraw = LS.get('fingerDraw', true);
 let fingerPrefSet = LS.get('fingerPrefSet', false);
@@ -91,9 +91,11 @@ function initHome() {
   };
   const onSession = () => {
     fillSelect($('#selProblem'), selSession().problems.map((p) => [p.no, `問${p.no}`]), last.no);
+    refreshProblemStatus();
   };
   $('#selExam').onchange = onExam;
   $('#selSession').onchange = onSession;
+  $('#selProblem').onchange = refreshProblemStatus;
   onExam();
   if (last.session) {
     const f = findSession(last.session);
@@ -117,6 +119,39 @@ function initHome() {
   const net = () => { $('#netState').textContent = navigator.onLine ? '' : '現在オフラインです'; };
   addEventListener('online', net); addEventListener('offline', net); net();
   refreshOffline();
+}
+
+/* 選択中の区分の各問について、解答状況を選択肢と状況欄に表示する */
+async function refreshProblemStatus() {
+  const session = selSession();
+  const sel = $('#selProblem');
+  const stats = await Promise.all(session.problems.map(async (p) => {
+    const key = `${session.id}:${p.no}`;
+    const [a, sc] = await Promise.all([DB.get('a:' + key), DB.get('s:' + key)]);
+    const filled = p.fields.filter((_, i) => a && (a[i] || '').trim()).length;
+    let earned = 0, total = 0, judged = 0;
+    for (const v of Object.values(sc || {})) {
+      total += v.p || 0;
+      if (v.j) judged++;
+      earned += earnedOf(v);
+    }
+    return { no: p.no, filled, all: p.fields.length, earned, total, judged };
+  }));
+  if (selSession() !== session) return;           // 待っている間に選択が変わった
+  for (const st of stats) {
+    const o = [...sel.options].find((x) => +x.value === st.no);
+    if (!o) continue;
+    const mark = st.filled === 0 ? '' : st.filled === st.all ? '　✔ 解答済み' : `　✎ 解答中 ${st.filled}/${st.all}`;
+    o.textContent = `問${st.no}${mark}`;
+  }
+  const st = stats.find((x) => x.no === +sel.value);
+  const box = $('#probStatus');
+  if (!st) { box.textContent = ''; return; }
+  const score = st.judged || st.total ? ` ／ 得点 ${st.earned} / ${st.total} 点` : '';
+  box.className = 'status' + (st.filled === 0 ? '' : st.filled === st.all ? ' done' : ' part');
+  box.textContent = (st.filled === 0 ? `未解答 (解答欄 ${st.all})`
+    : st.filled === st.all ? `✔ 解答済み (${st.all}/${st.all} 欄)`
+      : `✎ 解答中 (${st.filled}/${st.all} 欄に入力済み)`) + score;
 }
 
 function findSession(sid) {
@@ -210,14 +245,15 @@ function route() {
   else showHome();
 }
 
-function showHome() {
-  flushSave();
+async function showHome() {
+  await flushSave();
   $('#exam').hidden = true;
   $('#home').hidden = false;
   document.title = '支援士 午後問題';
   const last = LS.get('last', {});
   const f = last.session && findSession(last.session);
   if (f) $('#resumeInfo').textContent = `前回: ${f.exam.label} ${f.session.label} 問${last.no}`;
+  refreshProblemStatus();
   refreshOffline();
 }
 
@@ -226,9 +262,9 @@ async function openProblem(exam, session, problem) {
   Object.assign(cur, { exam, session, problem, undo: [], showAnswer: false, showReview: false });
   LS.set('last', { exam: exam.id, session: session.id, no: problem.no });
   const key = `${session.id}:${problem.no}`;
-  const [a, m, l] = await Promise.all([DB.get('a:' + key), DB.get('m:' + key), DB.get('l:' + key)]);
+  const [a, m, l, sc] = await Promise.all(['a:', 'm:', 'l:', 's:'].map((p) => DB.get(p + key)));
   if (cur.problem !== problem) return;
-  cur.answers = a || {}; cur.marks = m || {}; cur.limits = l || {};
+  cur.answers = a || {}; cur.marks = m || {}; cur.limits = l || {}; cur.scores = sc || {};
 
   $('#home').hidden = true;
   $('#exam').hidden = false;
@@ -442,6 +478,16 @@ function moveStroke(x, y) {
   const [nx, ny] = pagePoint(stroke.pg, x, y);
   if (!stroke.s) { eraseAt(stroke.pg, nx, ny); return; }
   const p = stroke.s.p;
+  if (stroke.s.k === 'm') {                // マーカーは常に直線 (水平・垂直に近ければ吸着)
+    let ex = nx, ey = ny;
+    const dx = Math.abs(nx - p[0]), dy = Math.abs(ny - p[1]);
+    if (dy <= dx * 0.27) ey = p[1];
+    else if (dx <= dy * 0.27) ex = p[0];
+    p.length = 2;
+    p.push(ex, ey);
+    drawPage(stroke.pg, stroke.s);
+    return;
+  }
   if (Math.hypot(nx - p[p.length - 2], ny - p[p.length - 1]) < 0.0015) return;
   p.push(nx, ny);
   drawPage(stroke.pg, stroke.s);
@@ -451,19 +497,8 @@ function endStroke(cancel) {
   const { pg, s } = stroke;
   stroke = null;
   if (!s) return;
-  if (cancel || (s.k === 'm' && s.p.length < 4)) { drawPage(pg); return; }
-  const p = s.p;
-  if (s.k === 'm') {                       // ほぼ水平なマーカーは直線に補正
-    let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9, sumY = 0;
-    for (let i = 0; i < p.length; i += 2) {
-      minX = Math.min(minX, p[i]); maxX = Math.max(maxX, p[i]);
-      minY = Math.min(minY, p[i + 1]); maxY = Math.max(maxY, p[i + 1]); sumY += p[i + 1];
-    }
-    if (maxY - minY < 0.014 && maxX - minX > 0.015) {
-      const y = sumY / (p.length / 2);
-      s.p = [minX, y, maxX, y];
-    }
-  }
+  const tooShort = s.k === 'm' && (s.p.length < 4 || Math.hypot(s.p[2] - s.p[0], s.p[3] - s.p[1]) < 0.008);
+  if (cancel || tooShort) { drawPage(pg); return; }
   s.p = s.p.map((v) => +v.toFixed(4));
   pushUndo(pg);
   (cur.marks[pg.name] = cur.marks[pg.name] || []).push(s);
@@ -594,7 +629,7 @@ function buildSheet() {
     const isText = f.ans && countChars(f.ans) > 8;
     const model = f.ans
       ? `<span class="tag">解答例</span>${esc(f.ans)}<small>${isText && !f.ans.includes('\n') ? countChars(f.ans) + '字' : ''}${f.note ? ' 備考: ' + esc(f.note) : ''}</small>`
-      : '<span class="tag">解答例</span>(図・表などによる解答です。下の「解答例の原本」を確認してください)';
+      : '<span class="tag">解答例</span>(図・表などによる解答です。「解答原本」ボタンで確認してください)';
     d.innerHTML = `
       <div class="field-head">
         <span class="lbl">${esc(label)}</span>
@@ -602,7 +637,14 @@ function buildSheet() {
         <button class="count" title="タップで字数制限を変更"></button>
       </div>
       <textarea rows="1" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
-      <div class="model" hidden>${model}</div>`;
+      <div class="model" hidden>${model}</div>
+      <div class="score" hidden>
+        <button class="judge o" data-j="o" title="正解">〇</button>
+        <button class="judge t" data-j="t" title="部分点">△</button>
+        <button class="judge x" data-j="x" title="不正解">×</button>
+        <label class="partial" hidden>部分点 <input class="part" type="number" inputmode="decimal" min="0" max="100" step="0.5"></label>
+        <label>配点 <input class="pts" type="number" inputmode="numeric" min="0" max="100" step="1"> 点</label>
+      </div>`;
     const ta = $('textarea', d);
     ta.value = cur.answers[i] || '';
     ta.addEventListener('input', () => {
@@ -618,28 +660,41 @@ function buildSheet() {
       DB.set(`l:${cur.session.id}:${p.no}`, cur.limits);
       updateCount(i);
     };
+    const pts = $('.pts', d);
+    if ((cur.scores[i] || {}).p != null) pts.value = cur.scores[i].p;
+    pts.addEventListener('input', () => {
+      const v = parseFloat(pts.value);
+      const sc = cur.scores[i] = cur.scores[i] || {};
+      if (Number.isFinite(v) && v >= 0) sc.p = v; else delete sc.p;
+      saveScores(); updateScore();
+    });
+    const part = $('.part', d);
+    if ((cur.scores[i] || {}).e != null) part.value = cur.scores[i].e;
+    part.addEventListener('input', () => {
+      const v = parseFloat(part.value);
+      const sc = cur.scores[i] = cur.scores[i] || {};
+      if (Number.isFinite(v) && v >= 0) sc.e = v; else delete sc.e;   // 空欄なら配点の半分
+      saveScores(); updateScore();
+    });
+    for (const b of $$('.judge', d)) {
+      b.onclick = () => {
+        const sc = cur.scores[i] = cur.scores[i] || {};
+        if (sc.j === b.dataset.j) delete sc.j; else sc.j = b.dataset.j;   // もう一度押すと解除
+        saveScores(); updateScore();
+      };
+    }
     group.appendChild(d);
     updateCount(i);
   });
   $('#purposeBox').innerHTML = p.purpose
     ? `<h3>出題趣旨</h3>${p.purpose.split('\n').map((t) => `<p>${esc(t)}</p>`).join('')}` : '';
   $('#reviewBox').innerHTML = `<h3>採点講評</h3>${p.review.length ? p.review.map((t) => `<p>${esc(t)}</p>`).join('') : '<p>(講評データがありません)</p>'}`;
-  const imgs = $('#ansImages');
-  imgs.innerHTML = '';
-  const det = $('#ansOriginal details');
-  det.open = false;
-  det.ontoggle = () => {
-    if (det.open && !imgs.childElementCount) {
-      for (const name of p.ansPages) {
-        const im = new Image();
-        im.alt = '解答例';
-        im.src = `data/${cur.session.id}/${name}`;
-        imgs.appendChild(im);
-      }
-    }
-  };
+  $('#ansImages').innerHTML = '';
   setAnswerShown(false);
   setReviewShown(false);
+  setScoreShown(false);
+  setOriginalShown(false);
+  updateScore();
   $('#sheet').scrollTop = 0;
   requestAnimationFrame(autosizeAll);
 }
@@ -650,7 +705,6 @@ function setAnswerShown(on) {
   $('#btnAnswer').textContent = on ? '解答を隠す' : '解答表示';
   for (const m of $$('#fields .model')) m.hidden = !on;
   $('#purposeBox').hidden = !on || !cur.problem.purpose;
-  $('#ansOriginal').hidden = !on;
 }
 function setReviewShown(on) {
   cur.showReview = on;
@@ -660,7 +714,69 @@ function setReviewShown(on) {
   if (on) $('#sheet').scrollTop = 0;
 }
 
+function setScoreShown(on) {
+  cur.showScore = on;
+  $('#btnScore').classList.toggle('on', on);
+  $('#scoreBar').hidden = !on;
+  for (const s of $$('#fields .score')) s.hidden = !on;
+}
+function setOriginalShown(on) {
+  cur.showOriginal = on;
+  $('#btnOriginal').classList.toggle('on', on);
+  $('#ansOriginal').hidden = !on;
+  if (!on) return;
+  const imgs = $('#ansImages');
+  if (!imgs.childElementCount) {
+    for (const name of cur.problem.ansPages) {
+      const im = new Image();
+      im.alt = '解答例の原本';
+      im.src = `data/${cur.session.id}/${name}`;
+      imgs.appendChild(im);
+    }
+  }
+  $('#sheet').scrollTop = 0;
+}
+function updateScore() {
+  let earned = 0, total = 0, o = 0, t = 0, x = 0;
+  cur.problem.fields.forEach((_, i) => {
+    const sc = cur.scores[i] || {};
+    const p = sc.p || 0;
+    total += p;
+    earned += earnedOf(sc);
+    if (sc.j === 'o') o++; else if (sc.j === 't') t++; else if (sc.j === 'x') x++;
+    const f = $(`#fields .field[data-i="${i}"]`);
+    if (!f) return;
+    f.classList.toggle('j-o', sc.j === 'o');
+    f.classList.toggle('j-t', sc.j === 't');
+    f.classList.toggle('j-x', sc.j === 'x');
+    for (const b of $$('.judge', f)) b.classList.toggle('on', b.dataset.j === sc.j);
+    $('.partial', f).hidden = sc.j !== 't';
+    $('.part', f).placeholder = p ? String(p / 2) : '';
+  });
+  const fmt = (n) => String(Math.round(n * 10) / 10);
+  $('#scoreEarned').textContent = fmt(earned);
+  $('#scoreTotal').textContent = fmt(total);
+  $('#scoreCount').textContent = `〇${o} △${t} ×${x} 未判定${cur.problem.fields.length - o - t - x}`;
+}
+/* 1 欄の得点: 〇=配点、△=入力した部分点 (未入力なら配点の半分、配点を超えない)、×=0 */
+function earnedOf(sc) {
+  const p = sc.p || 0;
+  if (sc.j === 'o') return p;
+  if (sc.j === 't') return Math.min(p, sc.e != null ? sc.e : p / 2);
+  return 0;
+}
+
 function initSheet() {
+  $('#btnScore').onclick = () => setScoreShown(!cur.showScore);
+  $('#btnOriginal').onclick = () => setOriginalShown(!cur.showOriginal);
+  $('#btnResetScore').onclick = () => {
+    if (!Object.keys(cur.scores).length) return;
+    if (!confirm('この問の〇×判定と配点をすべて消去しますか？')) return;
+    cur.scores = {};
+    saveScores();
+    for (const el of $$('#fields .pts, #fields .part')) el.value = '';
+    updateScore();
+  };
   $('#btnAnswer').onclick = () => setAnswerShown(!cur.showAnswer);
   $('#btnReview').onclick = () => setReviewShown(!cur.showReview);
   $('#btnClearAns').onclick = () => {
@@ -685,11 +801,14 @@ function initSheet() {
 const pending = new Map();
 function schedule(key, getVal) {
   if (pending.has(key)) clearTimeout(pending.get(key).tm);
-  const run = () => { pending.delete(key); DB.set(key, getVal()); };
+  const run = () => { pending.delete(key); return DB.set(key, getVal()); };
   pending.set(key, { tm: setTimeout(run, 400), run });
 }
-function flushSave() { for (const { tm, run } of [...pending.values()]) { clearTimeout(tm); run(); } }
+function flushSave() {
+  return Promise.all([...pending.values()].map(({ tm, run }) => { clearTimeout(tm); return run(); }));
+}
 function saveAnswers() { const a = cur.answers; schedule(`a:${cur.session.id}:${cur.problem.no}`, () => a); }
+function saveScores() { const s = cur.scores; schedule(`s:${cur.session.id}:${cur.problem.no}`, () => s); }
 function saveMarks() { const m = cur.marks; schedule(`m:${cur.session.id}:${cur.problem.no}`, () => m); }
 addEventListener('pagehide', flushSave);
 document.addEventListener('visibilitychange', () => { if (document.hidden) flushSave(); });

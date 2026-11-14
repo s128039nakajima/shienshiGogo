@@ -1,5 +1,5 @@
 /* Service Worker: アプリ本体は事前キャッシュ、問題画像は「見たら保存」+ TOP 画面からの一括保存 */
-const SHELL = 'sc-shell-v2';
+const SHELL = 'sc-shell-v7';
 const DATA = 'sc-data-v1';       // app.js の DATA_CACHE と同じ名前
 const SHELL_FILES = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',

@@ -31,6 +31,7 @@
       <label>問題
         <select id="selProblem"></select>
       </label>
+      <p id="probStatus" class="status"></p>
       <button id="btnStart" class="primary big">開始</button>
       <p id="resumeInfo" class="hint"></p>
     </section>
@@ -111,19 +112,25 @@
         <strong>解答用紙</strong>
         <span class="spacer"></span>
         <button id="btnAnswer" class="toggle">解答表示</button>
+        <button id="btnOriginal" class="toggle" title="解答例PDFの原本画像を表示">解答原本</button>
         <button id="btnReview" class="toggle">採点講評</button>
+        <button id="btnScore" class="toggle" title="〇×の判定と配点を入力">配点</button>
         <button id="btnClearAns" title="この問の解答を全消去">クリア</button>
       </div>
+      <div id="scoreBar" hidden>
+        <span>得点 <b id="scoreEarned">0</b> / 配点合計 <b id="scoreTotal">0</b> 点</span>
+        <span id="scoreCount" class="cnt"></span>
+        <span class="spacer"></span>
+        <button id="btnResetScore">採点をリセット</button>
+      </div>
       <div id="sheet" class="scroller">
+        <div id="ansOriginal" class="panel" hidden>
+          <h3>解答例の原本 (PDF 画像)</h3>
+          <div id="ansImages"></div>
+        </div>
         <div id="reviewBox" class="panel review" hidden></div>
         <div id="purposeBox" class="panel purpose" hidden></div>
         <div id="fields"></div>
-        <div id="ansOriginal" hidden>
-          <details>
-            <summary>解答例の原本(PDFの画像)を表示</summary>
-            <div id="ansImages"></div>
-          </details>
-        </div>
         <p class="hint center">入力内容は自動保存されます</p>
       </div>
     </section>

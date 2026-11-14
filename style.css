@@ -44,6 +44,9 @@ button.danger { color: var(--red); border-color: #f1b8b3; }
 .card label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
 .card select { display: block; width: 100%; margin-top: 4px; padding: 10px; font-size: 17px;
   border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); }
+.status { margin: -4px 0 12px; padding: 8px 10px; border-radius: 8px; font-size: 14px; background: #f3f5f8; color: var(--muted); }
+.status.done { background: #eef8f0; color: #16803c; font-weight: 600; }
+.status.part { background: #fff8e1; color: #b54708; font-weight: 600; }
 summary { cursor: pointer; font-size: 14px; padding: 4px 0; }
 #offlineList { list-style: none; padding: 0; margin: 8px 0; font-size: 13px; max-height: 240px; overflow: auto; }
 #offlineList li { display: flex; justify-content: space-between; padding: 4px 2px; border-bottom: 1px solid #eef1f5; }
@@ -126,7 +129,27 @@ summary { cursor: pointer; font-size: 14px; padding: 4px 0; }
 .panel h3 { margin: 0 0 4px; font-size: 14px; color: var(--navy); }
 .panel p { margin: 0 0 8px; text-indent: 1em; }
 .panel.review { border-color: #f0c36d; background: #fffaf0; }
-#ansOriginal { margin: 4px 2px 12px; }
+#scoreBar { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: #fff8e1;
+  border-bottom: 1px solid #f0c36d; font-size: 14px; flex-wrap: wrap; }
+#scoreBar b { font-size: 20px; font-variant-numeric: tabular-nums; }
+#scoreBar #scoreEarned { color: var(--red); }
+#scoreBar .cnt { color: var(--muted); font-size: 12px; }
+#scoreBar button { min-height: 30px; padding: 2px 10px; font-size: 12px; }
+.score { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 14px; }
+.score .judge { min-width: 44px; min-height: 36px; font-size: 20px; line-height: 1; padding: 0; font-weight: 700; }
+.score .judge.o { color: #2f6fb7; }
+.score .judge.x { color: #d92d20; }
+.score .judge.o.on { background: #2f6fb7; border-color: #2f6fb7; color: #fff; }
+.score .judge.x.on { background: #d92d20; border-color: #d92d20; color: #fff; }
+.score { flex-wrap: wrap; }
+.score .judge.t { color: #b38600; }
+.score .judge.t.on { background: #f5c400; border-color: #e0b300; color: #3d2f00; }
+.field.j-t { box-shadow: inset 4px 0 0 #f5c400; }
+.score label { margin-left: auto; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.score label.partial + label { margin-left: 0; }
+.score .part, .score .pts { width: 64px; padding: 6px; font-size: 16px; text-align: right; border: 1px solid var(--line); border-radius: 6px; }
+.field.j-o { box-shadow: inset 4px 0 0 #2f6fb7; }
+.field.j-x { box-shadow: inset 4px 0 0 #d92d20; }
 #ansImages img { width: 100%; display: block; border: 1px solid var(--line); margin-top: 8px; background: #fff; }
 
 #toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%);
