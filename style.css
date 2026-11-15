@@ -24,6 +24,7 @@ button {
 }
 button:active { background: #e8edf3; }
 button:disabled { opacity: .45; }
+button.armed, .topbar button.armed { background: var(--red); border-color: var(--red); color: #fff; font-weight: 700; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 button.big { padding: 12px; font-size: 18px; width: 100%; }
 button.danger { color: var(--red); border-color: #f1b8b3; }
@@ -86,6 +87,7 @@ summary { cursor: pointer; font-size: 14px; padding: 4px 0; }
   border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
 .toolbar::-webkit-scrollbar { display: none; }
 .toolbar button { min-height: 34px; min-width: 34px; padding: 4px 8px; flex: none; }
+.toolbar strong { white-space: nowrap; flex: none; }
 .toolbar .sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 3px; flex: none; }
 .toolbar .tool.on { outline: 2.5px solid var(--accent); outline-offset: -1px; background: #eaf2fb; }
 .toolbar .sw i { display: block; width: 18px; height: 18px; border-radius: 4px; border: 1px solid rgba(0,0,0,.2); }
@@ -94,7 +96,22 @@ summary { cursor: pointer; font-size: 14px; padding: 4px 0; }
 #zoomLabel { font-size: 12px; }
 
 .scroller { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
-#pages { padding: 8px; }
+#pages, #pages2 { padding: 8px; }
+#pages2 { background: #8a9099; }
+#pages2.drawing .page canvas { cursor: crosshair; }
+#zoom2Label { font-size: 12px; }
+/* 解答欄の下の問題表示枠 */
+#sub { flex: 0 0 var(--split2, 40%); min-height: 0; display: flex; flex-direction: column; }
+#divider2 { flex: 0 0 14px; background: #dfe4ea; cursor: row-resize; touch-action: none;
+  display: flex; align-items: center; justify-content: center; border-block: 1px solid var(--line); }
+#divider2 span { width: 44px; height: 4px; border-radius: 2px; background: #9aa4b2; }
+#divider2.drag { background: #c4d6ec; }
+/* ストップウォッチ */
+#stopwatch { display: flex; align-items: center; gap: 4px; flex: none; }
+#swTime { font-variant-numeric: tabular-nums; font-size: 16px; font-weight: 600; padding: 0 4px; opacity: .75; }
+#stopwatch.run #swTime { opacity: 1; color: #ffe74a; }
+#stopwatch button { min-width: 32px; padding: 4px 6px; }
+#stopwatch button.off { opacity: .35; }
 .page { position: relative; margin: 0 auto 8px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35);
   aspect-ratio: 1500 / 2122; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .page img { display: block; width: 100%; height: 100%; pointer-events: none; -webkit-user-drag: none; }

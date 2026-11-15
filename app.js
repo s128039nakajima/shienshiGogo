@@ -69,6 +69,27 @@ function toast(msg, ms = 2200) {
   toast.tm = setTimeout(() => { t.hidden = true; }, ms);
 }
 
+/* 消去系ボタンの確認: 1 回目で「消去?」に変わり、3 秒以内にもう一度押すと実行する。
+   (confirm() はホーム画面アプリなどで表示されず常にキャンセル扱いになることがあるため使わない) */
+function tapTwice(btn, label = '消去?') {
+  if (btn.dataset.armed) {
+    clearTimeout(btn._armTm);
+    btn.textContent = btn.dataset.armed;
+    delete btn.dataset.armed;
+    btn.classList.remove('armed');
+    return true;
+  }
+  btn.dataset.armed = btn.textContent;
+  btn.textContent = label;
+  btn.classList.add('armed');
+  btn._armTm = setTimeout(() => {
+    btn.textContent = btn.dataset.armed;
+    delete btn.dataset.armed;
+    btn.classList.remove('armed');
+  }, 3000);
+  return false;
+}
+
 /* ------------------------------------------------------------------ TOP 画面 */
 function fillSelect(sel, items, value) {
   sel.innerHTML = '';
@@ -107,12 +128,11 @@ function initHome() {
   $('#btnSaveExam').onclick = () => saveOffline(selExam().sessions);
   $('#btnSaveAll').onclick = () => {
     const total = EXAMS.flatMap((e) => e.sessions).reduce((a, s) => a + s.bytes, 0);
-    if (confirm(`全年度の問題データ (約 ${(total / 1e6).toFixed(0)} MB) を保存します。Wi-Fi 接続での実行をおすすめします。`)) {
-      saveOffline(EXAMS.flatMap((e) => e.sessions));
-    }
+    if (!tapTwice($('#btnSaveAll'), `約 ${(total / 1e6).toFixed(0)} MB を保存?`)) return;
+    saveOffline(EXAMS.flatMap((e) => e.sessions));
   };
   $('#btnClearOffline').onclick = async () => {
-    if (!confirm('保存した問題データを削除します (解答とマーキングは消えません)。')) return;
+    if (!tapTwice($('#btnClearOffline'), 'もう一度押すと削除します')) return;
     await caches.delete(DATA_CACHE);
     refreshOffline();
   };
@@ -276,6 +296,8 @@ async function openProblem(exam, session, problem) {
   $('#btnNext').disabled = idx === session.problems.length - 1;
   applySplit();
   buildPages();
+  views.sub.pages = [];          // 別の問題に移ったので下の枠も作り直す
+  applySub();
   buildSheet();
   setTool('none');
 }
@@ -309,16 +331,28 @@ function initDivider() {
 }
 
 /* ------------------------------------------------------------------ 問題冊子ページ */
-let io = null;
+/* 問題の表示枠は 2 つ: main = 左の冊子、sub = 解答欄の下の枠 (同じページ・同じマーキングを表示) */
+const views = {
+  main: { box: () => $('#pages'), pages: [], zoom: 1, key: 'zoom', label: '#zoomLabel', io: null },
+  sub: { box: () => $('#pages2'), pages: [], zoom: 1, key: 'zoom2', label: '#zoom2Label', io: null },
+};
+const allPages = () => views.main.pages.concat(views.sub.pages);
+/* 同じページを映している全ての枠を描き直す */
+function drawName(name) { for (const pg of allPages()) if (pg.name === name && pg.active) drawPage(pg); }
+
 function buildPages() {
-  const box = $('#pages');
+  buildView(views.main);
+  cur.pages = views.main.pages;
+}
+function buildView(v) {
+  const box = v.box();
   box.innerHTML = '';
   box.scrollTop = 0;
-  cur.pages = [];
-  if (io) io.disconnect();
-  io = new IntersectionObserver((ents) => {
+  v.pages = [];
+  if (v.io) v.io.disconnect();
+  const io = v.io = new IntersectionObserver((ents) => {
     for (const en of ents) {
-      const pg = cur.pages.find((p) => p.el === en.target);
+      const pg = v.pages.find((p) => p.el === en.target);
       if (!pg) continue;
       pg.active = en.isIntersecting;
       if (pg.active) sizeCanvas(pg); else { pg.canvas.width = pg.canvas.height = 0; }
@@ -348,10 +382,10 @@ function buildPages() {
     el.append(img, canvas, pno);
     box.appendChild(el);
     const pg = { name, el, canvas, ctx: canvas.getContext('2d'), active: false };
-    cur.pages.push(pg);
+    v.pages.push(pg);
     io.observe(el);
   });
-  setZoom(LS.get('zoom', 1), false);
+  setZoom(LS.get(v.key, 1), false, v);
 }
 
 function sizeCanvas(pg) {
@@ -389,20 +423,21 @@ function drawPage(pg, live) {
     ctx.stroke();
   }
 }
-function redrawAll() { for (const pg of cur.pages) if (pg.active) sizeCanvas(pg); }
+function redrawAll() { for (const pg of allPages()) if (pg.active) sizeCanvas(pg); }
 
-function setZoom(z, keep = true) {
+function setZoom(z, keep = true, v = views.main) {
   z = Math.min(4, Math.max(0.5, z));
-  const box = $('#pages');
-  const ratio = z / cur.zoom;
+  const box = v.box();
+  const ratio = z / v.zoom;
   const cx = box.scrollLeft + box.clientWidth / 2, top = box.scrollTop;
-  cur.zoom = z;
-  for (const pg of cur.pages) pg.el.style.width = `${z * 100}%`;
-  $('#zoomLabel').textContent = `${Math.round(z * 100)}%`;
+  v.zoom = z;
+  if (v === views.main) cur.zoom = z;
+  for (const pg of v.pages) pg.el.style.width = `${z * 100}%`;
+  $(v.label).textContent = `${Math.round(z * 100)}%`;
   if (keep) {
     box.scrollTop = top * ratio;
     box.scrollLeft = cx * ratio - box.clientWidth / 2;
-    LS.set('zoom', z);
+    LS.set(v.key, z);
   }
   clearTimeout(setZoom.tm);
   setZoom.tm = setTimeout(redrawAll, 120);
@@ -418,7 +453,7 @@ function setTool(tool, color) {
   for (const b of $$('#markbar .tool')) {
     b.classList.toggle('on', b.dataset.tool === tool && (!b.dataset.color || b.dataset.color === cur.color || tool === 'eraser'));
   }
-  $('#pages').classList.toggle('drawing', tool !== 'none');
+  for (const v of Object.values(views)) v.box().classList.toggle('drawing', tool !== 'none');
 }
 
 function pagePoint(pg, x, y) {
@@ -445,7 +480,7 @@ function eraseAt(pg, x, y) {
   if (keep.length !== list.length) {
     if (!stroke.erased) { pushUndo(pg); stroke.erased = true; }
     cur.marks[pg.name] = keep;
-    drawPage(pg);
+    drawName(pg.name);
     saveMarks();
   }
 }
@@ -459,7 +494,7 @@ function distSeg(x, y, x1, y1, x2, y2) {
 
 function beginStroke(target, x, y, id) {
   const el = target.closest && target.closest('.page');
-  const pg = el && cur.pages.find((p) => p.el === el);
+  const pg = el && allPages().find((p) => p.el === el);
   if (!pg) return false;
   if (!pg.canvas.width) sizeCanvas(pg);
   const [nx, ny] = pagePoint(pg, x, y);
@@ -502,17 +537,53 @@ function endStroke(cancel) {
   s.p = s.p.map((v) => +v.toFixed(4));
   pushUndo(pg);
   (cur.marks[pg.name] = cur.marks[pg.name] || []).push(s);
-  drawPage(pg);
+  drawName(pg.name);
   saveMarks();
 }
 
 function initMarking() {
-  const box = $('#pages');
   for (const b of $$('#markbar .tool')) b.onclick = () => setTool(b.dataset.tool, b.dataset.color);
   const chk = $('#chkFinger');
   chk.checked = fingerDraw;
   chk.onchange = () => { fingerDraw = chk.checked; fingerPrefSet = true; LS.set('fingerDraw', fingerDraw); LS.set('fingerPrefSet', true); };
 
+  for (const v of Object.values(views)) initViewInput(v, chk);
+  addEventListener('pointermove', (e) => { if (stroke && stroke.id === 'ptr' + e.pointerId) moveStroke(e.clientX, e.clientY); });
+  addEventListener('pointerup', (e) => { if (stroke && stroke.id === 'ptr' + e.pointerId) endStroke(false); });
+
+  $('#btnUndo').onclick = () => {
+    const u = cur.undo.pop();
+    if (!u) { toast('これ以上戻せません'); return; }
+    cur.marks[u.name] = u.prev;
+    drawName(u.name);
+    saveMarks();
+  };
+  $('#btnClearMarks').onclick = () => {
+    if (!Object.values(cur.marks).some((a) => a.length)) return;
+    if (!tapTwice($('#btnClearMarks'))) return;
+    cur.marks = {}; cur.undo = [];
+    redrawAll(); saveMarks();
+  };
+
+  // 拡大縮小
+  $('#btnZoomIn').onclick = () => setZoom(views.main.zoom * 1.2);
+  $('#btnZoomOut').onclick = () => setZoom(views.main.zoom / 1.2);
+  $('#btnZoomFit').onclick = () => setZoom(1);
+  $('#btnZoom2In').onclick = () => setZoom(views.sub.zoom * 1.2, true, views.sub);
+  $('#btnZoom2Out').onclick = () => setZoom(views.sub.zoom / 1.2, true, views.sub);
+  $('#btnZoom2Fit').onclick = () => setZoom(1, true, views.sub);
+
+  const ro = new ResizeObserver(() => {
+    clearTimeout(initMarking.tm);
+    initMarking.tm = setTimeout(() => { redrawAll(); autosizeAll(); }, 100);
+  });
+  ro.observe($('#left'));
+  ro.observe($('#sub'));
+}
+
+/* 1 つの表示枠に、描画 (タッチ / Pencil / マウス) と拡大縮小の操作を取り付ける */
+function initViewInput(v, chk) {
+  const box = v.box();
   // タッチ / Apple Pencil
   box.addEventListener('touchstart', (e) => {
     if (cur.tool === 'none') return;
@@ -547,43 +618,93 @@ function initMarking() {
     if (e.pointerType !== 'mouse' && (hasTouch || e.pointerType !== 'pen')) return;
     if (beginStroke(e.target, e.clientX, e.clientY, 'ptr' + e.pointerId)) e.preventDefault();
   });
-  addEventListener('pointermove', (e) => { if (stroke && stroke.id === 'ptr' + e.pointerId) moveStroke(e.clientX, e.clientY); });
-  addEventListener('pointerup', (e) => { if (stroke && stroke.id === 'ptr' + e.pointerId) endStroke(false); });
 
-  $('#btnUndo').onclick = () => {
-    const u = cur.undo.pop();
-    if (!u) { toast('これ以上戻せません'); return; }
-    cur.marks[u.name] = u.prev;
-    const pg = cur.pages.find((p) => p.name === u.name);
-    if (pg) drawPage(pg);
-    saveMarks();
-  };
-  $('#btnClearMarks').onclick = () => {
-    if (!Object.values(cur.marks).some((a) => a.length)) return;
-    if (!confirm('この問のマーキングをすべて消去しますか？')) return;
-    cur.marks = {}; cur.undo = [];
-    redrawAll(); saveMarks();
-  };
-
-  // 拡大縮小
-  $('#btnZoomIn').onclick = () => setZoom(cur.zoom * 1.2);
-  $('#btnZoomOut').onclick = () => setZoom(cur.zoom / 1.2);
-  $('#btnZoomFit').onclick = () => setZoom(1);
+  // ピンチ / Ctrl+ホイールで拡大縮小
   let gz = 1;
-  box.addEventListener('gesturestart', (e) => { e.preventDefault(); gz = cur.zoom; endStroke(true); });
-  box.addEventListener('gesturechange', (e) => { e.preventDefault(); setZoom(gz * e.scale); });
+  box.addEventListener('gesturestart', (e) => { e.preventDefault(); gz = v.zoom; endStroke(true); });
+  box.addEventListener('gesturechange', (e) => { e.preventDefault(); setZoom(gz * e.scale, true, v); });
   box.addEventListener('gestureend', (e) => { e.preventDefault(); });
   box.addEventListener('wheel', (e) => {
     if (!e.ctrlKey) return;
     e.preventDefault();
-    setZoom(cur.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+    setZoom(v.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1), true, v);
   }, { passive: false });
-
-  new ResizeObserver(() => {
-    clearTimeout(initMarking.tm);
-    initMarking.tm = setTimeout(() => { redrawAll(); autosizeAll(); }, 100);
-  }).observe($('#left'));
 }
+
+/* ------------------------------------------------------------------ 解答欄の下の問題表示枠 */
+function subShown() {
+  const v = LS.get('subShown', null);
+  return v === null ? innerWidth >= 760 : v;      // 初期値: 広い画面では表示、スマホ縦では非表示
+}
+function applySub() {
+  const on = subShown();
+  $('#sub').hidden = $('#divider2').hidden = !on;
+  $('#btnSub').classList.toggle('on', on);
+  $('#right').style.setProperty('--split2', LS.get('split2', 40) + '%');
+  if (on && cur.problem) {
+    if (!views.sub.pages.length) buildView(views.sub);   // 表示するときだけ画像を読み込む
+  } else {
+    if (views.sub.io) views.sub.io.disconnect();
+    views.sub.pages = [];
+    $('#pages2').innerHTML = '';
+  }
+  $('#pages2').classList.toggle('drawing', cur.tool !== 'none');
+  requestAnimationFrame(autosizeAll);
+}
+function initSub() {
+  const toggle = () => { LS.set('subShown', !subShown()); applySub(); };
+  $('#btnSub').onclick = toggle;
+  $('#btnSubClose').onclick = toggle;
+  const d = $('#divider2');
+  let dragging = false;
+  d.addEventListener('pointerdown', (e) => {
+    dragging = true; d.classList.add('drag'); d.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  d.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const rc = $('#right').getBoundingClientRect();
+    const r = Math.min(80, Math.max(15, ((rc.bottom - e.clientY) / rc.height) * 100));
+    $('#right').style.setProperty('--split2', r.toFixed(1) + '%');
+    LS.set('split2', +r.toFixed(1));
+  });
+  const end = () => { dragging = false; d.classList.remove('drag'); };
+  d.addEventListener('pointerup', end);
+  d.addEventListener('pointercancel', end);
+}
+
+/* ------------------------------------------------------------------ ストップウォッチ (問題を移動しても継続) */
+const SW = {
+  state: LS.get('stopwatch', { running: false, startedAt: 0, elapsed: 0 }),
+  elapsed() { return this.state.elapsed + (this.state.running ? Date.now() - this.state.startedAt : 0); },
+  save() { LS.set('stopwatch', this.state); },
+  render() {
+    const s = Math.floor(this.elapsed() / 1000);
+    const pad = (n) => String(n).padStart(2, '0');
+    $('#swTime').textContent = `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
+    $('#swToggle').textContent = this.state.running ? '⏸' : '▶';
+    $('#swToggle').title = this.state.running ? '一時停止' : '開始';
+    $('#stopwatch').classList.toggle('run', this.state.running);
+    $('#swReset').classList.toggle('off', this.state.running);
+    $('#swReset').title = this.state.running ? '一時停止中のみリセットできます' : 'リセット';
+  },
+  toggle() {
+    if (this.state.running) { this.state.elapsed = this.elapsed(); this.state.running = false; }
+    else { this.state.startedAt = Date.now(); this.state.running = true; }
+    this.save(); this.render();
+  },
+  reset() {
+    if (this.state.running) { toast('一時停止してからリセットできます'); return; }   // 計測中は誤操作防止のため無効
+    this.state = { running: false, startedAt: 0, elapsed: 0 };
+    this.save(); this.render();
+  },
+  init() {
+    $('#swToggle').onclick = () => this.toggle();
+    $('#swReset').onclick = () => this.reset();
+    setInterval(() => { if (this.state.running && !$('#exam').hidden) this.render(); }, 250);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.render(); });
+    this.render();
+  },
+};
 
 /* ------------------------------------------------------------------ 解答用紙 */
 const countChars = (s) => [...s.replace(/[\r\n]/g, '')].length;
@@ -771,7 +892,7 @@ function initSheet() {
   $('#btnOriginal').onclick = () => setOriginalShown(!cur.showOriginal);
   $('#btnResetScore').onclick = () => {
     if (!Object.keys(cur.scores).length) return;
-    if (!confirm('この問の〇×判定と配点をすべて消去しますか？')) return;
+    if (!tapTwice($('#btnResetScore'))) return;
     cur.scores = {};
     saveScores();
     for (const el of $$('#fields .pts, #fields .part')) el.value = '';
@@ -781,7 +902,7 @@ function initSheet() {
   $('#btnReview').onclick = () => setReviewShown(!cur.showReview);
   $('#btnClearAns').onclick = () => {
     if (!Object.values(cur.answers).some((v) => v)) return;
-    if (!confirm('この問の解答をすべて消去しますか？')) return;
+    if (!tapTwice($('#btnClearAns'))) return;
     cur.answers = {};
     saveAnswers();
     for (const ta of $$('#fields textarea')) { ta.value = ''; autosize(ta); }
@@ -826,6 +947,8 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) flush
   initHome();
   initDivider();
   initMarking();
+  initSub();
+  SW.init();
   initSheet();
   addEventListener('hashchange', route);
   route();

@@ -74,6 +74,11 @@
     <button id="btnBack" title="TOPへ戻る">‹ TOP</button>
     <div id="examTitle"></div>
     <div class="spacer"></div>
+    <div id="stopwatch" title="ストップウォッチ (別の問題に移っても継続します)">
+      <span id="swTime">00:00:00</span>
+      <button id="swToggle" title="開始">▶</button>
+      <button id="swReset" title="リセット">↺</button>
+    </div>
     <button id="btnPrev" title="前の問">‹</button>
     <button id="btnNext" title="次の問">›</button>
   </header>
@@ -115,6 +120,7 @@
         <button id="btnOriginal" class="toggle" title="解答例PDFの原本画像を表示">解答原本</button>
         <button id="btnReview" class="toggle">採点講評</button>
         <button id="btnScore" class="toggle" title="〇×の判定と配点を入力">配点</button>
+        <button id="btnSub" class="toggle" title="解答欄の下に問題表示枠を表示/非表示">問題枠</button>
         <button id="btnClearAns" title="この問の解答を全消去">クリア</button>
       </div>
       <div id="scoreBar" hidden>
@@ -132,6 +138,18 @@
         <div id="purposeBox" class="panel purpose" hidden></div>
         <div id="fields"></div>
         <p class="hint center">入力内容は自動保存されます</p>
+      </div>
+      <div id="divider2" title="ドラッグで解答欄との比率を調整"><span></span></div>
+      <div id="sub">
+        <div class="toolbar">
+          <strong>問題</strong>
+          <span class="spacer"></span>
+          <button id="btnZoom2Out" title="縮小">－</button>
+          <button id="btnZoom2Fit" title="幅に合わせる"><span id="zoom2Label">100%</span></button>
+          <button id="btnZoom2In" title="拡大">＋</button>
+          <button id="btnSubClose" title="問題表示枠を隠す">✕ 隠す</button>
+        </div>
+        <div id="pages2" class="scroller pages"></div>
       </div>
     </section>
   </div>
